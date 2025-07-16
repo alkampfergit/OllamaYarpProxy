@@ -14,11 +14,15 @@ if (!string.IsNullOrEmpty(configFile))
     Console.WriteLine($"Using configuration file: {configFile}");
 }
 
+// Configure O3ProConfig from configuration
+builder.Services.Configure<O3ProConfig>(builder.Configuration.GetSection("O3ProConfig"));
+
 // Remove explicit logging configuration to allow appsettings.json to control logging
 // builder.Logging.ClearProviders();
 // builder.Logging.AddConsole();
 
 builder.Services.AddSingleton<StandardTransform>();
+builder.Services.AddSingleton<O3ProClient>();
 
 // Add YARP reverse proxy
 builder.Services.AddReverseProxy()

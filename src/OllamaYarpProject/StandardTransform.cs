@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http.Extensions;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Text;
@@ -10,10 +11,12 @@ namespace OllamaYarpProject;
 public class StandardTransform : ITransformProvider
 {
     private readonly ILogger<StandardTransform> _logger;
+    private readonly IOptionsMonitor<O3ProConfig> _o3ProConfig;
 
-    public StandardTransform(ILogger<StandardTransform> logger)
+    public StandardTransform(ILogger<StandardTransform> logger, IOptionsMonitor<O3ProConfig> o3ProConfig)
     {
         _logger = logger;
+        _o3ProConfig = o3ProConfig;
     }
 
     public void Apply(TransformBuilderContext context)
@@ -29,7 +32,6 @@ public class StandardTransform : ITransformProvider
         context.AddRequestTransform(async transformContext =>
         {
             var context = transformContext.HttpContext;
-
 
             if (context.Request.Path == "/api/tags")
             {
@@ -52,7 +54,9 @@ public class StandardTransform : ITransformProvider
                     
                     if (model == "o3-pro")
                     {
-                        _logger.LogError("Proxy: Request to /v1/chat/completions with model 'o3-pro' detected");
+                        var currentConfig = _o3ProConfig.CurrentValue;
+                        _logger.LogError("Proxy: Request to /v1/chat/completions with model 'o3-pro' detected. Endpoint: {endpoint}, ApiKey configured: {hasApiKey}", 
+                            currentConfig.Endpoint, !string.IsNullOrEmpty(currentConfig.ApiKey));
                     }
                 }
                 catch (JsonException ex)
