@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Http.Extensions;
-using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Text;
@@ -11,12 +10,12 @@ namespace OllamaYarpProject;
 public class StandardTransform : ITransformProvider
 {
     private readonly ILogger<StandardTransform> _logger;
-    private readonly IOptionsMonitor<O3ProConfig> _o3ProConfig;
+    private readonly O3ProClient _o3ProClient;
 
-    public StandardTransform(ILogger<StandardTransform> logger, IOptionsMonitor<O3ProConfig> o3ProConfig)
+    public StandardTransform(ILogger<StandardTransform> logger, O3ProClient o3ProClient)
     {
         _logger = logger;
-        _o3ProConfig = o3ProConfig;
+        _o3ProClient = o3ProClient;
     }
 
     public void Apply(TransformBuilderContext context)
@@ -47,22 +46,51 @@ public class StandardTransform : ITransformProvider
                 string body = await reader.ReadToEndAsync();
                 context.Request.Body.Position = 0;
 
+
+                var chatCompletion = JsonConvert.DeserializeObject<ChatCompletionRequest>(body);
+
                 try
                 {
-                    var json = JsonConvert.DeserializeObject(body) as JObject;
-                    var model = json?.Value<string>("model");
-                    
-                    if (model == "o3-pro")
+                    if (chatCompletion?.Model?.Equals("o3-pro", StringComparison.OrdinalIgnoreCase) == true)
                     {
-                        var currentConfig = _o3ProConfig.CurrentValue;
-                        _logger.LogError("Proxy: Request to /v1/chat/completions with model 'o3-pro' detected. Endpoint: {endpoint}, ApiKey configured: {hasApiKey}", 
-                            currentConfig.Endpoint, !string.IsNullOrEmpty(currentConfig.ApiKey));
+                        _logger.LogInformation("Proxy: Request to /v1/chat/completions with model 'o3-pro' detected, calling O3ProClient");
+                        //create a single message from the chat completion messages
+                        StringBuilder stringBuilder = new StringBuilder();
+                        foreach (var message in chatCompletion.Messages)
+                        {
+                            stringBuilder.AppendLine($"Role: {message.Role}");
+                            stringBuilder.AppendLine(message.Content);
+                            stringBuilder.AppendLine("-------");
+                        }
+
+                        var o3proresponse = await _o3ProClient.CreateResponseAsync(stringBuilder.ToString());
+                        var response = transformContext.HttpContext.Response;
+                        response.StatusCode = 200;
+                        response.ContentType = "application/json";
+
+                        ChatCompletionChunk ccc = new ChatCompletionChunk();
+                        ccc.Id = Guid.NewGuid().ToString();
+                        ccc.Model = "o3-pro";
+                        ccc.Choices.Add(new ChatCompletionChunkChoice()
+                        {
+                            Delta = new ChatCompletionDelta()
+                            {
+                                Content = o3proresponse
+                            },
+                        });
+
+                        //serialize to json 
+                        var jsonResponse = JsonConvert.SerializeObject(ccc, Formatting.Indented);
+                        await response.WriteAsync(jsonResponse);
+                        return;
+
                     }
                 }
-                catch (JsonException ex)
+                catch (Exception ex)
                 {
-                    _logger.LogWarning($"Proxy: Failed to parse request body as JSON: {ex.Message}");
+                    //ignore --- send the request to the proxy
                 }
+
 
                 transformContext.Path = "/chat/completions";
                 _logger.LogInformation("Proxy: Request path rewritten from v1/chat/completions to chat/completions");
@@ -93,7 +121,7 @@ public class StandardTransform : ITransformProvider
 
                 await response.WriteAsync(jsonResponse);
             }
-            else if (context.Request.Path == "/api/version") 
+            else if (context.Request.Path == "/api/version")
             {
                 var response = transformContext.HttpContext.Response;
                 response.StatusCode = 200;
