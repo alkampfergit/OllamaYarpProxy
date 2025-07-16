@@ -1,6 +1,18 @@
 using OllamaYarpProject;
+using System.Reflection;
+
+// Set current directory to executable location
+Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Add custom configuration file if found
+var configFile = ConfigurationUtilities.FindYarpOllamaConfig(Environment.CurrentDirectory);
+if (!string.IsNullOrEmpty(configFile))
+{
+    builder.Configuration.AddJsonFile(configFile, optional: true, reloadOnChange: true);
+    Console.WriteLine($"Using configuration file: {configFile}");
+}
 
 // Remove explicit logging configuration to allow appsettings.json to control logging
 // builder.Logging.ClearProviders();

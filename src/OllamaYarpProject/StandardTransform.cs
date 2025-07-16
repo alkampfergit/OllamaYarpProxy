@@ -39,9 +39,29 @@ public class StandardTransform : ITransformProvider
             }
             else if (context.Request.Path == "/v1/chat/completions")
             {
-                //we need to change the request to the endpoint models
+                context.Request.EnableBuffering();
+
+                using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+                string body = await reader.ReadToEndAsync();
+                context.Request.Body.Position = 0;
+
+                try
+                {
+                    var json = JsonConvert.DeserializeObject(body) as JObject;
+                    var model = json?.Value<string>("model");
+                    
+                    if (model == "o3-pro")
+                    {
+                        _logger.LogError("Proxy: Request to /v1/chat/completions with model 'o3-pro' detected");
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning($"Proxy: Failed to parse request body as JSON: {ex.Message}");
+                }
+
                 transformContext.Path = "/chat/completions";
-                _logger.LogInformation("Proxy: Request path rewritten from v1/chat/completions to v1/chat/completions");
+                _logger.LogInformation("Proxy: Request path rewritten from v1/chat/completions to chat/completions");
             }
             else if (context.Request.Path == "/api/show")
             {
