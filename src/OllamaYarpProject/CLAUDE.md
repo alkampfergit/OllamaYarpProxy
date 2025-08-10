@@ -9,10 +9,16 @@ OllamaYarpProxy is an ASP.NET Core reverse proxy that emulates Ollama's API endp
 ## Build and Run Commands
 
 - **Build and run**: `dotnet run --project src/OllamaYarpProject`
-- **Build**: `dotnet build src/OllamaYarpProject`
+- **Build only**: `dotnet build src/OllamaYarpProject`
+- **Build from solution**: `dotnet build src/OllamaYarp.sln`
 - **Run with specific profile**: `dotnet run --project src/OllamaYarpProject --launch-profile "http"`
 
 The application listens on http://localhost:11434 by default and forwards requests to http://localhost:4000.
+
+## Testing and Linting
+
+- **No explicit test commands found** - this project doesn't appear to have unit tests configured yet
+- **No linting commands found** - standard .NET analyzers are used via project configuration
 
 ## Architecture
 
@@ -72,7 +78,21 @@ The application listens on http://localhost:11434 by default and forwards reques
 
 ## Dependencies
 
-- **.NET 9.0**: Target framework
+- **.NET 9.0**: Target framework with nullable reference types enabled
 - **Yarp.ReverseProxy 2.3.0**: Core reverse proxy functionality  
 - **Newtonsoft.Json 13.0.3**: JSON serialization/deserialization
-- **Azure.AI.OpenAI 2.1.0**: OpenAI integration (referenced but not actively used in current implementation)
+- **Azure.AI.OpenAI 2.2.0-beta.5**: OpenAI integration (for O3ProClient)
+- **OpenAI 2.3.0**: OpenAI API client library
+- **Ollama 1.15.0**: Ollama client library
+
+## Recent Changes and Current State
+
+The codebase is currently on feature/custom-model branch with ongoing work on:
+- Custom model integration (O3ProClient and related classes)
+- Enhanced chat completion response building
+- OpenAI model compatibility improvements
+
+Modified files in current working state:
+- `GenerateChatCompletionResponseBuilder.cs`: Chat completion response handling
+- `OpenaiModel.cs`: OpenAI model definitions and mappings  
+- `StandardTransform.cs`: Core transformation logic with null reference warnings

@@ -1,17 +1,38 @@
 using OllamaYarpProject;
+using OllamaYarpProject.Models;
 using System.Reflection;
+using Serilog;
+using Yarp.ReverseProxy.Configuration;
 
 // Set current directory to executable location
 Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add custom configuration file if found
+// Add custom configuration file if found (before configuring Serilog)
 var configFile = ConfigurationUtilities.FindYarpOllamaConfig(Environment.CurrentDirectory);
 if (!string.IsNullOrEmpty(configFile))
 {
     builder.Configuration.AddJsonFile(configFile, optional: true, reloadOnChange: true);
-    Console.WriteLine($"Using configuration file: {configFile}");
+}
+
+// Configure Serilog from configuration
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+
+// Log configuration file discovery
+var logger = Log.ForContext("SourceContext", "Startup");
+if (!string.IsNullOrEmpty(configFile))
+{
+    logger.Information("Found configuration override file: {ConfigFile} in directory: {Directory}",
+        configFile, Path.GetDirectoryName(configFile));
+}
+else
+{
+    logger.Debug("No configuration override file found, using default appsettings.json");
 }
 
 // Configure O3ProConfig from configuration
@@ -23,6 +44,7 @@ builder.Services.Configure<O3ProConfig>(builder.Configuration.GetSection("O3ProC
 
 builder.Services.AddSingleton<StandardTransform>();
 builder.Services.AddSingleton<O3ProClient>();
+builder.Services.AddSingleton<ChunkManipulator>();
 
 // Add YARP reverse proxy
 builder.Services.AddReverseProxy()
@@ -30,6 +52,36 @@ builder.Services.AddReverseProxy()
     .AddTransforms<StandardTransform>();
 
 var app = builder.Build();
+
+// Log YARP configuration at startup
+var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+var config = app.Services.GetRequiredService<IConfiguration>();
+
+startupLogger.LogInformation("=== OllamaYarpProject Configuration ===");
+
+// Log Kestrel endpoints
+var kestrelSection = config.GetSection("Kestrel:Endpoints");
+foreach (var endpoint in kestrelSection.GetChildren())
+{
+    var url = endpoint.GetValue<string>("Url");
+    startupLogger.LogInformation("Listening on: {EndpointName} = {Url}", endpoint.Key, url);
+}
+
+// Log YARP configuration
+var reverseProxySection = config.GetSection("ReverseProxy");
+var clustersSection = reverseProxySection.GetSection("Clusters");
+foreach (var cluster in clustersSection.GetChildren())
+{
+    startupLogger.LogInformation("YARP Cluster: {ClusterName}", cluster.Key);
+    var destinations = cluster.GetSection("Destinations");
+    foreach (var dest in destinations.GetChildren())
+    {
+        var address = dest.GetValue<string>("Address");
+        startupLogger.LogInformation("  -> Destination {DestName}: {Address}", dest.Key, address);
+    }
+}
+
+startupLogger.LogInformation("========================================");
 
 // Optionally, keep a root endpoint
 app.MapGet("/", () => "OllamaYarpProject Reverse Proxy is running.");

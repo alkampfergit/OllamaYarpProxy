@@ -5,30 +5,23 @@
       "Default": "Debug",
       "Override": {
         "Microsoft": "Information",
-        "Microsoft.Hosting.Lifetime": "Information",
-        "Microsoft.AspNetCore": "Information",
+        "Microsoft.Hosting.Lifetime": "Information", 
+        "Microsoft.AspNetCore": "Warning",
         "System": "Warning",
-        "Yarp": "Information"
+        "Yarp": "Debug",
+        "OllamaYarpProject": "Debug"
       }
     },
     "WriteTo": [
       {
         "Name": "Console",
         "Args": {
-          "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+          "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"
         }
       }
     ],
     "Enrich": [ "FromLogContext" ]
   },
-  "Logging": {
-    "LogLevel": {
-      "Default": "Debug",
-      "Microsoft.AspNetCore": "Debug",
-      "OllamaYarpProject": "Debug"
-    }
-  },
-  "AllowedHosts": "*",
   "ReverseProxy": {
     "Routes": {
       "ollama": {
@@ -42,30 +35,22 @@
       "ollamaCluster": {
         "Destinations": {
           "destination1": {
-            "Address": "http://localhost:4000/"
+            "Address": "http://192.168.64.2:4000/"
           }
         }
       }
     }
   },
   "Kestrel": {
-    "Limits": {
-      "MaxRequestBodySize": 2147483648,
-      "KeepAliveTimeout": "00:10:00",
-      "RequestHeadersTimeout": "00:10:00"
-    },
-
     "Endpoints": {
-
       "Http": {
         "Url": "http://localhost:11434"
-
       }
     }
   },
   "O3ProConfig": {
-    "Endpoint": "https://api.example.com",
-    "ApiKey": "your-api-key-here",
-    "DeploymentName": "o3-pro"
+    "Endpoint": "https://api.override.com",
+    "ApiKey": "override-api-key",
+    "DeploymentName": "o3-pro-override"
   }
 }

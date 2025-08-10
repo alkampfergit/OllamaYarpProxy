@@ -1,4 +1,4 @@
-namespace OllamaYarpProject;
+namespace OllamaYarpProject.Models;
 
 public class O3ProConfig
 {
