@@ -44,7 +44,8 @@ builder.Services.Configure<O3ProConfig>(builder.Configuration.GetSection("O3ProC
 
 builder.Services.AddSingleton<StandardTransform>();
 builder.Services.AddSingleton<O3ProClient>();
-builder.Services.AddSingleton<ChunkManipulator>();
+builder.Services.AddTransient<ChunkManipulator>();
+builder.Services.AddSingleton<IChunkManipulatorFactory, ChunkManipulatorFactory>();
 
 // Add YARP reverse proxy
 builder.Services.AddReverseProxy()

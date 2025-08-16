@@ -15,13 +15,13 @@ public class StandardTransform : ITransformProvider
 {
     private readonly ILogger<StandardTransform> _logger;
     private readonly IEnumerable<IModel> _models;
-    private readonly ChunkManipulator _chunkManipulator;
+    private readonly IChunkManipulatorFactory _chunkManipulatorFactory;
 
-    public StandardTransform(ILogger<StandardTransform> logger, IEnumerable<IModel> models, ChunkManipulator chunkManipulator)
+    public StandardTransform(ILogger<StandardTransform> logger, IEnumerable<IModel> models, IChunkManipulatorFactory chunkManipulatorFactory)
     {
         _logger = logger;
         _models = models;
-        _chunkManipulator = chunkManipulator;
+        _chunkManipulatorFactory = chunkManipulatorFactory;
     }
 
     private class RequestResponseData
@@ -282,6 +282,9 @@ public class StandardTransform : ITransformProvider
 
                     if (isStreamingResponse)
                     {
+                        // Create a new chunk manipulator for this streaming request
+                        var chunkManipulator = _chunkManipulatorFactory.CreateChunkManipulator();
+                        
                         // For streaming responses, we need to intercept the stream line by line
                         var responseStream = await response.Content.ReadAsStreamAsync();
                         var reader = new StreamReader(responseStream, Encoding.UTF8);
@@ -316,16 +319,20 @@ public class StandardTransform : ITransformProvider
                                 }
                                 
                                 // Process chunk through ChunkManipulator
-                                var processedChunk = _chunkManipulator.ProcessChunk(chunkContent);
+                                var processedChunk = chunkManipulator.ProcessChunk(chunkContent);
                                 
-                                if (processedChunk != chunkContent)
+                                // Only forward to client if we got a processed chunk back (not null)
+                                if (processedChunk != null)
                                 {
-                                    _logger.LogDebug("[CHUNK PROCESSING] Chunk {ChunkNumber} was modified by ChunkManipulator", totalChunks);
+                                    if (processedChunk != chunkContent)
+                                    {
+                                        _logger.LogDebug("[CHUNK PROCESSING] Chunk {ChunkNumber} was modified by ChunkManipulator", totalChunks);
+                                    }
+                                    
+                                    // Forward the processed chunk to the client
+                                    var chunkBytes = Encoding.UTF8.GetBytes(processedChunk);
+                                    await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
                                 }
-                                
-                                // Forward the (possibly modified) chunk to the client
-                                var chunkBytes = Encoding.UTF8.GetBytes(processedChunk);
-                                await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
                                 
                                 // Reset for next chunk
                                 currentChunk.Clear();
@@ -338,9 +345,20 @@ public class StandardTransform : ITransformProvider
                             var remainingContent = currentChunk.ToString();
                             responseContentBuilder.Append(remainingContent);
                             
-                            var processedRemaining = _chunkManipulator.ProcessChunk(remainingContent);
-                            var remainingBytes = Encoding.UTF8.GetBytes(processedRemaining);
-                            await context.Response.Body.WriteAsync(remainingBytes, 0, remainingBytes.Length);
+                            var processedRemaining = chunkManipulator.ProcessChunk(remainingContent);
+                            if (processedRemaining != null)
+                            {
+                                var remainingBytes = Encoding.UTF8.GetBytes(processedRemaining);
+                                await context.Response.Body.WriteAsync(remainingBytes, 0, remainingBytes.Length);
+                            }
+                        }
+                        
+                        // Get final chunk with all accumulated citations
+                        var finalChunk = chunkManipulator.GetFinalChunk();
+                        if (finalChunk != null)
+                        {
+                            var finalBytes = Encoding.UTF8.GetBytes(finalChunk);
+                            await context.Response.Body.WriteAsync(finalBytes, 0, finalBytes.Length);
                         }
                         
                         // Store the accumulated response content
