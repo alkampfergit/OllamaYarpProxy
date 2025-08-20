@@ -16,12 +16,14 @@ public class StandardTransform : ITransformProvider
     private readonly ILogger<StandardTransform> _logger;
     private readonly IChunkManipulatorFactory _chunkManipulatorFactory;
     private readonly IModelRouter _modelRouter;
+    private readonly IResponseInterceptorFactory _interceptorFactory;
 
-    public StandardTransform(ILogger<StandardTransform> logger, IChunkManipulatorFactory chunkManipulatorFactory, IModelRouter modelRouter)
+    public StandardTransform(ILogger<StandardTransform> logger, IChunkManipulatorFactory chunkManipulatorFactory, IModelRouter modelRouter, IResponseInterceptorFactory interceptorFactory)
     {
         _logger = logger;
         _chunkManipulatorFactory = chunkManipulatorFactory;
         _modelRouter = modelRouter;
+        _interceptorFactory = interceptorFactory;
     }
 
     private class RequestResponseData
@@ -29,6 +31,7 @@ public class StandardTransform : ITransformProvider
         public string RequestMethod { get; set; } = "";
         public string RequestPath { get; set; } = "";
         public string RequestBody { get; set; } = "";
+        public string ModelName { get; set; } = "";
         public Dictionary<string, string> RequestHeaders { get; set; } = new();
         public DateTime RequestTime { get; set; }
         public string ResponseContent { get; set; } = "";
@@ -86,6 +89,13 @@ public class StandardTransform : ITransformProvider
                 }
                  
                 var cco = JsonConvert.DeserializeObject<GenerateChatCompletionRequest>(body);
+                
+                // Store model name in request data for later use by interceptors
+                if (context.Items.TryGetValue("RequestResponseData", out var requestDataObj2) 
+                    && requestDataObj2 is RequestResponseData requestData2)
+                {
+                    requestData2.ModelName = cco?.Model ?? "";
+                }
                  
                 try
                 {
@@ -236,10 +246,7 @@ public class StandardTransform : ITransformProvider
             }
             else if (response?.RequestMessage?.RequestUri?.LocalPath == "/chat/completions")
             {
-                // Intercept streaming chat completion responses for logging and file writing
-                _logger.LogDebug("[RESPONSE INTERCEPT] Intercepting streaming response for {Method} {OriginalPath}", method, originalPath);
-                
-                // Get stored request data
+                // Get stored request data to determine the model
                 RequestResponseData? requestData = null;
                 if (context.Items.TryGetValue("RequestResponseData", out var requestDataObj) 
                     && requestDataObj is RequestResponseData data)
@@ -251,111 +258,20 @@ public class StandardTransform : ITransformProvider
                 
                 try
                 {
-                    var contentType = response.Content.Headers.ContentType?.ToString();
-                    var transferEncoding = response.Headers.TransferEncodingChunked;
-                    bool isStreamingResponse = contentType?.Contains("text/event-stream") == true || 
-                                             contentType?.Contains("text/plain") == true ||
-                                             transferEncoding == true;
-
-                    if (isStreamingResponse)
+                    // Find appropriate interceptor for this model
+                    var interceptor = _interceptorFactory.GetInterceptorForModel(requestData?.ModelName ?? "");
+                    
+                    if (interceptor != null && await interceptor.ShouldInterceptAsync(context, response))
                     {
-                        // Create a new chunk manipulator for this streaming request
-                        var chunkManipulator = _chunkManipulatorFactory.CreateChunkManipulator();
+                        _logger.LogDebug("[RESPONSE INTERCEPT] Using interceptor {InterceptorName} for model {ModelName}", 
+                            interceptor.Name, requestData?.ModelName ?? "unknown");
                         
-                        // For streaming responses, we need to intercept the stream line by line
-                        var responseStream = await response.Content.ReadAsStreamAsync();
-                        var reader = new StreamReader(responseStream, Encoding.UTF8);
-                        var totalChunks = 0;
-                        var firstChunks = new List<string>();
-                        var maxFirstChunks = 3;
-                        
-                        // Use StringBuilder to accumulate all chunks for file logging
-                        var responseContentBuilder = new StringBuilder();
-                        
-                        string? line;
-                        var currentChunk = new StringBuilder();
-                        
-                        while ((line = await reader.ReadLineAsync()) != null)
-                        {
-                            // Add the line to current chunk
-                            currentChunk.AppendLine(line);
-                            
-                            // SSE chunks end with empty line (double \n\n)
-                            if (string.IsNullOrEmpty(line))
-                            {
-                                var chunkContent = currentChunk.ToString();
-                                totalChunks++;
-                                
-                                // Accumulate for file logging
-                                responseContentBuilder.Append(chunkContent);
-                                
-                                // Capture first few chunks for debug logging
-                                if (firstChunks.Count < maxFirstChunks)
-                                {
-                                    firstChunks.Add(chunkContent);
-                                }
-                                
-                                // Process chunk through ChunkManipulator
-                                var processedChunk = chunkManipulator.ProcessChunk(chunkContent);
-                                
-                                // Only forward to client if we got a processed chunk back (not null)
-                                if (processedChunk != null)
-                                {
-                                    if (processedChunk != chunkContent)
-                                    {
-                                        _logger.LogDebug("[CHUNK PROCESSING] Chunk {ChunkNumber} was modified by ChunkManipulator", totalChunks);
-                                    }
-                                    
-                                    // Forward the processed chunk to the client
-                                    var chunkBytes = Encoding.UTF8.GetBytes(processedChunk);
-                                    await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
-                                }
-                                
-                                // Reset for next chunk
-                                currentChunk.Clear();
-                            }
-                        }
-                        
-                        // Handle any remaining content (chunk without trailing empty line)
-                        if (currentChunk.Length > 0)
-                        {
-                            var remainingContent = currentChunk.ToString();
-                            responseContentBuilder.Append(remainingContent);
-                            
-                            var processedRemaining = chunkManipulator.ProcessChunk(remainingContent);
-                            if (processedRemaining != null)
-                            {
-                                var remainingBytes = Encoding.UTF8.GetBytes(processedRemaining);
-                                await context.Response.Body.WriteAsync(remainingBytes, 0, remainingBytes.Length);
-                            }
-                        }
-                        
-                        // Get final chunk with all accumulated citations
-                        var finalChunk = chunkManipulator.GetFinalChunk();
-                        if (finalChunk != null)
-                        {
-                            var finalBytes = Encoding.UTF8.GetBytes(finalChunk);
-                            await context.Response.Body.WriteAsync(finalBytes, 0, finalBytes.Length);
-                        }
-                        
-                        // Store the accumulated response content
-                        if (requestData != null)
-                        {
-                            requestData.ResponseContent = responseContentBuilder.ToString();
-                        }
-                        
-                        // Log the intercepted response details
-                        var firstContent = string.Join("", firstChunks);
-                        var truncatedContent = firstContent.Length > 200 ? firstContent.Substring(0, 200) + "..." : firstContent;
-                        
-                        _logger.LogDebug("[RESPONSE INTERCEPT] Streaming response intercepted - Total chunks: {TotalChunks}, First content: {FirstContent}", 
-                            totalChunks, truncatedContent);
-                        
+                        await interceptor.InterceptAsync(context, response);
                         transformContext.SuppressResponseBody = true;
                     }
                     else
                     {
-                        // For non-streaming responses, read the full content
+                        // Fallback to default behavior for non-streaming responses or when no interceptor is found
                         var content = await response.Content.ReadAsStringAsync();
                         var contentLength = content.Length;
                         
@@ -369,7 +285,7 @@ public class StandardTransform : ITransformProvider
                         var firstLines = string.Join("\n", lines.Take(3));
                         var truncatedContent = firstLines.Length > 200 ? firstLines.Substring(0, 200) + "..." : firstLines;
                         
-                        _logger.LogDebug("[RESPONSE INTERCEPT] Non-streaming response intercepted - Total length: {ContentLength} chars, First lines: {FirstContent}", 
+                        _logger.LogDebug("[RESPONSE INTERCEPT] No interceptor found - using default handling. Total length: {ContentLength} chars, First lines: {FirstContent}", 
                             contentLength, truncatedContent);
                     }
                     

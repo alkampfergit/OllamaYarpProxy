@@ -6,59 +6,91 @@ using Xunit;
 
 namespace OllamaYarpProject.Tests;
 
-public class ConfigurationFinderTests
+public class ConfigurationFinderTests : IDisposable
 {
-    private readonly Mock<IFileSystem> _fileSystemMock;
-    private readonly Mock<ILogger<ConfigurationFinder>> _loggerMock;
+    private readonly string _tempDirectory;
     private readonly ConfigurationFinder _configurationFinder;
+    private readonly List<string> _createdDirectories = new();
+    private readonly List<string> _createdFiles = new();
 
     public ConfigurationFinderTests()
     {
-        _fileSystemMock = new Mock<IFileSystem>();
-        _loggerMock = new Mock<ILogger<ConfigurationFinder>>();
-        _configurationFinder = new ConfigurationFinder(_fileSystemMock.Object, _loggerMock.Object);
+        _tempDirectory = Path.Combine(Path.GetTempPath(), "OllamaYarpTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(_tempDirectory);
+        _createdDirectories.Add(_tempDirectory);
+
+        var fileSystem = new FileSystemWrapper();
+        var logger = Mock.Of<ILogger<ConfigurationFinder>>();
+        _configurationFinder = new ConfigurationFinder(fileSystem, logger);
+    }
+
+    public void Dispose()
+    {
+        // Clean up created files
+        foreach (var file in _createdFiles)
+        {
+            try
+            {
+                if (File.Exists(file))
+                    File.Delete(file);
+            }
+            catch
+            {
+                // Ignore cleanup errors
+            }
+        }
+
+        // Clean up created directories (in reverse order)
+        for (int i = _createdDirectories.Count - 1; i >= 0; i--)
+        {
+            try
+            {
+                if (Directory.Exists(_createdDirectories[i]))
+                    Directory.Delete(_createdDirectories[i], true);
+            }
+            catch
+            {
+                // Ignore cleanup errors
+            }
+        }
+    }
+
+    private string CreateTempFile(string directory, string fileName)
+    {
+        var filePath = Path.Combine(directory, fileName);
+        File.WriteAllText(filePath, "{}"); // Create empty JSON file
+        _createdFiles.Add(filePath);
+        return filePath;
+    }
+
+    private string CreateTempDirectory(string parentDirectory, string dirName)
+    {
+        var dirPath = Path.Combine(parentDirectory, dirName);
+        Directory.CreateDirectory(dirPath);
+        _createdDirectories.Add(dirPath);
+        return dirPath;
     }
 
     [Fact]
     public void FindYarpOllamaConfig_WithOllamaYarpProxyJson_ReturnsCorrectPath()
     {
         // Arrange
-        var testDirectory = @"C:\test";
-        var expectedConfigFile = @"C:\test\ollama-yarp-proxy.json";
-        
-        _fileSystemMock.Setup(fs => fs.Combine(testDirectory, "ollama-yarp-proxy.json"))
-                      .Returns(expectedConfigFile);
-        _fileSystemMock.Setup(fs => fs.Exists(expectedConfigFile))
-                      .Returns(true);
+        var testDirectory = CreateTempDirectory(_tempDirectory, "test");
+        var expectedConfigFile = CreateTempFile(testDirectory, "ollama-yarp-proxy.json");
 
         // Act
         var result = _configurationFinder.FindYarpOllamaConfig(testDirectory);
 
         // Assert
         Assert.Equal(expectedConfigFile, result);
-        _fileSystemMock.Verify(fs => fs.Exists(expectedConfigFile), Times.Once);
     }
 
     [Fact]
     public void FindYarpOllamaConfig_WithLegacyYarpollamaFile_ReturnsCorrectPath()
     {
         // Arrange
-        var testDirectory = @"C:\test";
-        var expectedConfigFile = @"C:\test\yarpollama.json";
-        var ollamaYarpProxyFile = @"C:\test\ollama-yarp-proxy.json";
-
-        _fileSystemMock.Setup(fs => fs.Combine(testDirectory, "ollama-yarp-proxy.json"))
-                      .Returns(ollamaYarpProxyFile);
-        _fileSystemMock.Setup(fs => fs.Exists(ollamaYarpProxyFile))
-                      .Returns(false);
-        
-        var mockFiles = new[]
-        {
-            new FileInfo(expectedConfigFile)
-        };
-        
-        _fileSystemMock.Setup(fs => fs.GetFiles(testDirectory, "yarpollama*", SearchOption.TopDirectoryOnly))
-                      .Returns(mockFiles);
+        var testDirectory = CreateTempDirectory(_tempDirectory, "test");
+        var expectedConfigFile = CreateTempFile(testDirectory, "yarpollama.json");
 
         // Act
         var result = _configurationFinder.FindYarpOllamaConfig(testDirectory);
@@ -71,17 +103,8 @@ public class ConfigurationFinderTests
     public void FindYarpOllamaConfig_NoConfigFound_ReturnsNull()
     {
         // Arrange
-        var testDirectory = @"C:\test";
-        var ollamaYarpProxyFile = @"C:\test\ollama-yarp-proxy.json";
-
-        _fileSystemMock.Setup(fs => fs.Combine(testDirectory, "ollama-yarp-proxy.json"))
-                      .Returns(ollamaYarpProxyFile);
-        _fileSystemMock.Setup(fs => fs.Exists(ollamaYarpProxyFile))
-                      .Returns(false);
-        _fileSystemMock.Setup(fs => fs.GetFiles(testDirectory, "yarpollama*", SearchOption.TopDirectoryOnly))
-                      .Returns(Array.Empty<FileInfo>());
-        _fileSystemMock.Setup(fs => fs.GetParentDirectory(testDirectory))
-                      .Returns((DirectoryInfo?)null);
+        var testDirectory = CreateTempDirectory(_tempDirectory, "test");
+        // Don't create any config files
 
         // Act
         var result = _configurationFinder.FindYarpOllamaConfig(testDirectory);
@@ -94,27 +117,11 @@ public class ConfigurationFinderTests
     public void FindYarpOllamaConfig_SearchesParentDirectories()
     {
         // Arrange
-        var childDirectory = @"C:\test\child";
-        var parentDirectory = @"C:\test";
-        var expectedConfigFile = @"C:\test\ollama-yarp-proxy.json";
+        var parentDirectory = CreateTempDirectory(_tempDirectory, "parent");
+        var childDirectory = CreateTempDirectory(parentDirectory, "child");
+        var expectedConfigFile = CreateTempFile(parentDirectory, "ollama-yarp-proxy.json");
 
-        // Child directory - no config
-        _fileSystemMock.Setup(fs => fs.Combine(childDirectory, "ollama-yarp-proxy.json"))
-                      .Returns(@"C:\test\child\ollama-yarp-proxy.json");
-        _fileSystemMock.Setup(fs => fs.Exists(@"C:\test\child\ollama-yarp-proxy.json"))
-                      .Returns(false);
-        _fileSystemMock.Setup(fs => fs.GetFiles(childDirectory, "yarpollama*", SearchOption.TopDirectoryOnly))
-                      .Returns(Array.Empty<FileInfo>());
-        _fileSystemMock.Setup(fs => fs.GetParentDirectory(childDirectory))
-                      .Returns(new DirectoryInfo(parentDirectory));
-
-        // Parent directory - has config
-        _fileSystemMock.Setup(fs => fs.Combine(parentDirectory, "ollama-yarp-proxy.json"))
-                      .Returns(expectedConfigFile);
-        _fileSystemMock.Setup(fs => fs.Exists(expectedConfigFile))
-                      .Returns(true);
-
-        // Act
+        // Act - Start search from child directory
         var result = _configurationFinder.FindYarpOllamaConfig(childDirectory);
 
         // Assert
@@ -128,27 +135,39 @@ public class ConfigurationFinderTests
     public void FindYarpOllamaConfig_CaseInsensitiveLegacyMatch_ReturnsCorrectPath(string fileName)
     {
         // Arrange
-        var testDirectory = @"C:\test";
-        var expectedConfigFile = $@"C:\test\{fileName}.json";
-        var ollamaYarpProxyFile = @"C:\test\ollama-yarp-proxy.json";
-
-        _fileSystemMock.Setup(fs => fs.Combine(testDirectory, "ollama-yarp-proxy.json"))
-                      .Returns(ollamaYarpProxyFile);
-        _fileSystemMock.Setup(fs => fs.Exists(ollamaYarpProxyFile))
-                      .Returns(false);
-        
-        var mockFiles = new[]
-        {
-            new FileInfo(expectedConfigFile)
-        };
-        
-        _fileSystemMock.Setup(fs => fs.GetFiles(testDirectory, "yarpollama*", SearchOption.TopDirectoryOnly))
-                      .Returns(mockFiles);
+        var testDirectory = CreateTempDirectory(_tempDirectory, "test");
+        var expectedConfigFile = CreateTempFile(testDirectory, $"{fileName}.json");
 
         // Act
         var result = _configurationFinder.FindYarpOllamaConfig(testDirectory);
 
         // Assert
         Assert.Equal(expectedConfigFile, result);
+    }
+
+    [Fact]
+    public void FindYarpOllamaConfig_PrefersOllamaYarpProxyOverLegacy()
+    {
+        // Arrange
+        var testDirectory = CreateTempDirectory(_tempDirectory, "test");
+        var legacyFile = CreateTempFile(testDirectory, "yarpollama.json");
+        var preferredFile = CreateTempFile(testDirectory, "ollama-yarp-proxy.json");
+
+        // Act
+        var result = _configurationFinder.FindYarpOllamaConfig(testDirectory);
+
+        // Assert - Should prefer ollama-yarp-proxy.json over legacy file
+        Assert.Equal(preferredFile, result);
+    }
+
+    [Fact]
+    public void FindYarpOllamaConfig_WithNonExistentDirectory_ReturnsNull()
+    {
+        // Arrange
+        var nonExistentDirectory = Path.Combine(_tempDirectory, "does-not-exist");
+
+        // Act & Assert - Should not throw and should return null
+        var result = _configurationFinder.FindYarpOllamaConfig(nonExistentDirectory);
+        Assert.Null(result);
     }
 }

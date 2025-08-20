@@ -1,6 +1,9 @@
 using OllamaYarpProject;
 using OllamaYarpProject.Models;
 using OllamaYarpProject.Interfaces;
+using OllamaYarpProject.Configuration;
+using OllamaYarpProject.Services;
+using OllamaYarpProject.Interceptors;
 using System.Reflection;
 using Serilog;
 using Yarp.ReverseProxy.Configuration;
@@ -36,8 +39,9 @@ else
     logger.Debug("No configuration override file found, using default appsettings.json");
 }
 
-// Configure O3ProConfig from configuration
+// Configure O3ProConfig and InterceptorConfiguration from configuration
 builder.Services.Configure<O3ProConfig>(builder.Configuration.GetSection("O3ProConfig"));
+builder.Services.Configure<InterceptorConfiguration>(builder.Configuration.GetSection("InterceptorConfiguration"));
 
 // Remove explicit logging configuration to allow appsettings.json to control logging
 // builder.Logging.ClearProviders();
@@ -51,6 +55,10 @@ builder.Services.AddSingleton<StandardTransform>();
 builder.Services.AddSingleton<O3ProClient>();
 builder.Services.AddTransient<ChunkManipulator>();
 builder.Services.AddSingleton<IChunkManipulatorFactory, ChunkManipulatorFactory>();
+
+// Register response interceptors
+builder.Services.AddTransient<CitationResponseInterceptor>();
+builder.Services.AddSingleton<IResponseInterceptorFactory, ResponseInterceptorFactory>();
 
 // Add YARP reverse proxy
 builder.Services.AddReverseProxy()
