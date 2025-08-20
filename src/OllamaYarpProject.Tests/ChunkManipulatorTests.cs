@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using OllamaYarpProject;
+using OllamaYarpProject.Interfaces;
 using System.Text.Json;
 using Xunit;
 using Moq;

@@ -25,6 +25,8 @@ The application listens on http://localhost:11434 by default and forwards reques
 
 ## Developer Guidelines
 
+**IMPORTANT**
+
 - After making changes, always buid and run tests to verify that everything is ok.
 - After a task is completed, commit the code with a good commit message that describes the changes made.
 

@@ -4,6 +4,7 @@ using OllamaYarpProject.Interfaces;
 using OllamaYarpProject.Configuration;
 using OllamaYarpProject.Services;
 using OllamaYarpProject.Interceptors;
+using OllamaYarpProject.Processors;
 using System.Reflection;
 using Serilog;
 using Yarp.ReverseProxy.Configuration;
@@ -53,10 +54,15 @@ builder.Services.AddSingleton<IModelRouter, ModelRouter>();
 
 builder.Services.AddSingleton<StandardTransform>();
 builder.Services.AddSingleton<O3ProClient>();
+
+// Register new streaming response processing services
+builder.Services.AddSingleton<ISseParser, SseParser>();
+builder.Services.AddTransient<CitationStreamingProcessor>();
+builder.Services.AddSingleton<IStreamingResponseProcessorFactory, StreamingResponseProcessorFactory>();
+
+// Keep old services for backward compatibility during transition
 builder.Services.AddTransient<ChunkManipulator>();
 builder.Services.AddSingleton<IChunkManipulatorFactory, ChunkManipulatorFactory>();
-
-// Register response interceptors
 builder.Services.AddTransient<CitationResponseInterceptor>();
 builder.Services.AddSingleton<IResponseInterceptorFactory, ResponseInterceptorFactory>();
 

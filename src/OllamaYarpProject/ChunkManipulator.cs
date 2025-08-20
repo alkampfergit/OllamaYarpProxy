@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using OllamaYarpProject.Interfaces;
 
 namespace OllamaYarpProject;
 
@@ -15,26 +16,6 @@ public interface IChunkManipulator
     string? GetFinalChunk();
 }
 
-public class ChatCompletionChunk
-{
-    public string Id { get; set; } = "";
-    public long Created { get; set; }
-    public string Model { get; set; } = "";
-    public string Object { get; set; } = "";
-    public List<Choice> Choices { get; set; } = new();
-    public List<string> Citations { get; set; } = new();
-}
-
-public class Choice
-{
-    public int Index { get; set; }
-    public Delta Delta { get; set; } = new();
-}
-
-public class Delta
-{
-    public string Content { get; set; } = "";
-}
 
 public class ChunkManipulatorFactory : IChunkManipulatorFactory
 {

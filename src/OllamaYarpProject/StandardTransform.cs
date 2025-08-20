@@ -5,6 +5,7 @@ using Ollama;
 using OllamaYarpProject.Interfaces;
 using OllamaYarpProject.Models;
 using OllamaYarpProject.Helpers;
+using OllamaYarpProject.Services;
 using System.Text;
 using Yarp.ReverseProxy.Transforms;
 using Yarp.ReverseProxy.Transforms.Builder;
@@ -14,16 +15,20 @@ namespace OllamaYarpProject;
 public class StandardTransform : ITransformProvider
 {
     private readonly ILogger<StandardTransform> _logger;
-    private readonly IChunkManipulatorFactory _chunkManipulatorFactory;
     private readonly IModelRouter _modelRouter;
-    private readonly IResponseInterceptorFactory _interceptorFactory;
+    private readonly ISseParser _sseParser;
+    private readonly IStreamingResponseProcessorFactory _processorFactory;
 
-    public StandardTransform(ILogger<StandardTransform> logger, IChunkManipulatorFactory chunkManipulatorFactory, IModelRouter modelRouter, IResponseInterceptorFactory interceptorFactory)
+    public StandardTransform(
+        ILogger<StandardTransform> logger, 
+        IModelRouter modelRouter,
+        ISseParser sseParser,
+        IStreamingResponseProcessorFactory processorFactory)
     {
         _logger = logger;
-        _chunkManipulatorFactory = chunkManipulatorFactory;
         _modelRouter = modelRouter;
-        _interceptorFactory = interceptorFactory;
+        _sseParser = sseParser;
+        _processorFactory = processorFactory;
     }
 
     private class RequestResponseData
@@ -258,20 +263,21 @@ public class StandardTransform : ITransformProvider
                 
                 try
                 {
-                    // Find appropriate interceptor for this model
-                    var interceptor = _interceptorFactory.GetInterceptorForModel(requestData?.ModelName ?? "");
-                    
-                    if (interceptor != null && await interceptor.ShouldInterceptAsync(context, response))
+                    var contentType = response.Content.Headers.ContentType?.ToString();
+                    var transferEncoding = response.Headers.TransferEncodingChunked;
+                    bool isStreamingResponse = contentType?.Contains("text/event-stream") == true || 
+                                             contentType?.Contains("text/plain") == true ||
+                                             transferEncoding == true;
+
+                    if (isStreamingResponse)
                     {
-                        _logger.LogDebug("[RESPONSE INTERCEPT] Using interceptor {InterceptorName} for model {ModelName}", 
-                            interceptor.Name, requestData?.ModelName ?? "unknown");
-                        
-                        await interceptor.InterceptAsync(context, response);
+                        // Handle streaming response with new architecture
+                        await HandleStreamingResponse(context, response, requestData);
                         transformContext.SuppressResponseBody = true;
                     }
                     else
                     {
-                        // Fallback to default behavior for non-streaming responses or when no interceptor is found
+                        // Handle non-streaming response
                         var content = await response.Content.ReadAsStringAsync();
                         var contentLength = content.Length;
                         
@@ -280,12 +286,11 @@ public class StandardTransform : ITransformProvider
                             requestData.ResponseContent = content;
                         }
                         
-                        // Get first few lines for logging
                         var lines = content.Split('\n');
                         var firstLines = string.Join("\n", lines.Take(3));
                         var truncatedContent = firstLines.Length > 200 ? firstLines.Substring(0, 200) + "..." : firstLines;
                         
-                        _logger.LogDebug("[RESPONSE INTERCEPT] No interceptor found - using default handling. Total length: {ContentLength} chars, First lines: {FirstContent}", 
+                        _logger.LogDebug("[RESPONSE INTERCEPT] Non-streaming response. Total length: {ContentLength} chars, First lines: {FirstContent}", 
                             contentLength, truncatedContent);
                     }
                     
@@ -303,6 +308,83 @@ public class StandardTransform : ITransformProvider
 
             _logger.LogDebug("[RESPONSE COMPLETE] Response sent for {Method} {OriginalPath}", method, originalPath);
         });
+    }
+
+    private async Task HandleStreamingResponse(HttpContext context, HttpResponseMessage response, RequestResponseData? requestData)
+    {
+        var modelName = requestData?.ModelName ?? "";
+        var processor = _processorFactory.GetProcessor(modelName);
+        
+        _logger.LogDebug("[STREAMING HANDLER] Processing streaming response for model {ModelName} with processor {ProcessorName}", 
+            modelName, processor?.Name ?? "none");
+
+        var responseStream = await response.Content.ReadAsStreamAsync();
+        var responseBuilder = new StringBuilder();
+
+        await foreach (var sseEvent in _sseParser.ParseSseStreamAsync(responseStream))
+        {
+            if (sseEvent.IsDone)
+            {
+                // Write [DONE] event
+                var doneEventData = "data: [DONE]\n\n";
+                responseBuilder.Append(doneEventData);
+                var doneBytes = Encoding.UTF8.GetBytes(doneEventData);
+                await context.Response.Body.WriteAsync(doneBytes, 0, doneBytes.Length);
+                break;
+            }
+
+            if (sseEvent.IsJsonData)
+            {
+                // Parse the chunk
+                var chunk = _sseParser.ParseChatCompletionChunk(sseEvent.Data);
+                if (chunk != null)
+                {
+                    // Process the chunk if we have a processor
+                    var modifiedChunk = processor?.ProcessChunk(chunk);
+                    var chunkToSend = modifiedChunk ?? chunk;
+
+                    // Serialize back to SSE format
+                    var serializedChunk = _sseParser.SerializeChatCompletionChunk(chunkToSend);
+                    var sseData = $"data: {serializedChunk}\n\n";
+                    
+                    responseBuilder.Append(sseData);
+                    var chunkBytes = Encoding.UTF8.GetBytes(sseData);
+                    await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
+                }
+                else
+                {
+                    // Failed to parse, send original
+                    var originalData = $"data: {sseEvent.Data}\n\n";
+                    responseBuilder.Append(originalData);
+                    var originalBytes = Encoding.UTF8.GetBytes(originalData);
+                    await context.Response.Body.WriteAsync(originalBytes, 0, originalBytes.Length);
+                }
+            }
+            else
+            {
+                // Non-JSON data, send as-is
+                var eventData = $"data: {sseEvent.Data}\n\n";
+                responseBuilder.Append(eventData);
+                var eventBytes = Encoding.UTF8.GetBytes(eventData);
+                await context.Response.Body.WriteAsync(eventBytes, 0, eventBytes.Length);
+            }
+        }
+
+        // Get final content from processor
+        var finalContent = processor?.GetFinalContent();
+        if (!string.IsNullOrEmpty(finalContent))
+        {
+            var finalBytes = Encoding.UTF8.GetBytes(finalContent);
+            await context.Response.Body.WriteAsync(finalBytes, 0, finalBytes.Length);
+        }
+
+        // Store response content for logging
+        if (requestData != null)
+        {
+            requestData.ResponseContent = responseBuilder.ToString();
+        }
+
+        _logger.LogDebug("[STREAMING HANDLER] Completed streaming response processing for model {ModelName}", modelName);
     }
 
     private async Task WriteRequestResponseToFile(RequestResponseData data)
