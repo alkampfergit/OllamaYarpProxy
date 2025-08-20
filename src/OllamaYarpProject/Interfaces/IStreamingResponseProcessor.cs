@@ -66,6 +66,7 @@ public class SseEvent
 {
     public string EventType { get; set; } = "data";
     public string Data { get; set; } = "";
+    public string OriginalData { get; set; } = ""; // Original SSE event string as received
     public bool IsJsonData => EventType == "data" && !string.IsNullOrEmpty(Data) && Data.Trim() != "[DONE]";
     public bool IsDone => EventType == "data" && Data.Trim() == "[DONE]";
 }

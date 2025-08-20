@@ -43,11 +43,10 @@ public class StreamingResponseHandler : IStreamingResponseHandler
         {
             if (sseEvent.IsDone)
             {
-                // Write [DONE] event
-                var doneEventData = "data: [DONE]\n\n";
-                responseBuilder.Append(doneEventData);
-                var doneBytes = Encoding.UTF8.GetBytes(doneEventData);
-                await context.Response.Body.WriteAsync(doneBytes, 0, doneBytes.Length);
+                // Write [DONE] event using original format
+                responseBuilder.Append(sseEvent.OriginalData);
+                var doneBytes = Encoding.UTF8.GetBytes(sseEvent.OriginalData);
+                await context.Response.Body.WriteAsync(doneBytes);
                 break;
             }
 
@@ -59,32 +58,39 @@ public class StreamingResponseHandler : IStreamingResponseHandler
                 {
                     // Process the chunk if we have a processor
                     var modifiedChunk = processor?.ProcessChunk(chunk);
-                    var chunkToSend = modifiedChunk ?? chunk;
-
-                    // Serialize back to SSE format
-                    var serializedChunk = _sseParser.SerializeChatCompletionChunk(chunkToSend);
-                    var sseData = $"data: {serializedChunk}\n\n";
                     
-                    responseBuilder.Append(sseData);
-                    var chunkBytes = Encoding.UTF8.GetBytes(sseData);
-                    await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
+                    if (modifiedChunk != null)
+                    {
+                        // Chunk was modified, serialize the modified version
+                        var serializedChunk = _sseParser.SerializeChatCompletionChunk(modifiedChunk);
+                        var sseData = $"data: {serializedChunk}\n\n";
+                        
+                        responseBuilder.Append(sseData);
+                        var chunkBytes = Encoding.UTF8.GetBytes(sseData);
+                        await context.Response.Body.WriteAsync(chunkBytes);
+                    }
+                    else
+                    {
+                        // No modification needed, use original SSE event data
+                        responseBuilder.Append(sseEvent.OriginalData);
+                        var originalBytes = Encoding.UTF8.GetBytes(sseEvent.OriginalData);
+                        await context.Response.Body.WriteAsync(originalBytes);
+                    }
                 }
                 else
                 {
-                    // Failed to parse, send original
-                    var originalData = $"data: {sseEvent.Data}\n\n";
-                    responseBuilder.Append(originalData);
-                    var originalBytes = Encoding.UTF8.GetBytes(originalData);
-                    await context.Response.Body.WriteAsync(originalBytes, 0, originalBytes.Length);
+                    // Failed to parse, send original SSE event data
+                    responseBuilder.Append(sseEvent.OriginalData);
+                    var originalBytes = Encoding.UTF8.GetBytes(sseEvent.OriginalData);
+                    await context.Response.Body.WriteAsync(originalBytes);
                 }
             }
             else
             {
-                // Non-JSON data, send as-is
-                var eventData = $"data: {sseEvent.Data}\n\n";
-                responseBuilder.Append(eventData);
-                var eventBytes = Encoding.UTF8.GetBytes(eventData);
-                await context.Response.Body.WriteAsync(eventBytes, 0, eventBytes.Length);
+                // Non-JSON data, send original SSE event data as-is
+                responseBuilder.Append(sseEvent.OriginalData);
+                var eventBytes = Encoding.UTF8.GetBytes(sseEvent.OriginalData);
+                await context.Response.Body.WriteAsync(eventBytes);
             }
         }
 
@@ -93,7 +99,7 @@ public class StreamingResponseHandler : IStreamingResponseHandler
         if (!string.IsNullOrEmpty(finalContent))
         {
             var finalBytes = Encoding.UTF8.GetBytes(finalContent);
-            await context.Response.Body.WriteAsync(finalBytes, 0, finalBytes.Length);
+            await context.Response.Body.WriteAsync(finalBytes);
         }
 
         // Store response content for logging

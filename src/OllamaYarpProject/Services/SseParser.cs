@@ -33,6 +33,7 @@ public class SseParser : ISseParser
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var currentEvent = new SseEvent();
         var dataBuilder = new StringBuilder();
+        var originalDataBuilder = new StringBuilder(); // Capture original SSE format
 
         string? line;
         while ((line = await reader.ReadLineAsync()) != null)
@@ -46,14 +47,23 @@ public class SseParser : ISseParser
                 if (dataBuilder.Length > 0)
                 {
                     currentEvent.Data = dataBuilder.ToString();
+                    
+                    // Add the empty line to complete the original SSE format
+                    originalDataBuilder.AppendLine();
+                    currentEvent.OriginalData = originalDataBuilder.ToString();
+                    
                     yield return currentEvent;
                     
                     // Reset for next event
                     currentEvent = new SseEvent();
                     dataBuilder.Clear();
+                    originalDataBuilder.Clear();
                 }
                 continue;
             }
+
+            // Capture original line for reconstruction
+            originalDataBuilder.AppendLine(line);
 
             // Parse SSE line
             if (line.StartsWith("data: "))
