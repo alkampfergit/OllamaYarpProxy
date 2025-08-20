@@ -121,7 +121,7 @@ public class StreamingResponseHandler : IStreamingResponseHandler
             responseBuilder.Append(chunk);
             
             var chunkBytes = Encoding.UTF8.GetBytes(chunk);
-            await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
+            await context.Response.Body.WriteAsync(chunkBytes);
             
             // Flush immediately to maintain streaming behavior
             await context.Response.Body.FlushAsync();
