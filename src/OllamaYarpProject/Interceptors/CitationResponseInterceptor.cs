@@ -69,18 +69,27 @@ public class CitationResponseInterceptor : IResponseInterceptor
                 // Process chunk through ChunkManipulator
                 var processedChunk = chunkManipulator.ProcessChunk(chunkContent);
                 
-                // Only forward to client if we got a processed chunk back (not null)
+                // Forward either the processed chunk or the original chunk
+                string chunkToForward;
                 if (processedChunk != null)
                 {
+                    // ChunkManipulator processed the chunk
+                    chunkToForward = processedChunk;
                     if (processedChunk != chunkContent)
                     {
                         _logger.LogDebug("[CITATION INTERCEPTOR] Chunk {ChunkNumber} was modified by ChunkManipulator", totalChunks);
                     }
-                    
-                    // Forward the processed chunk to the client
-                    var chunkBytes = Encoding.UTF8.GetBytes(processedChunk);
-                    await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
                 }
+                else
+                {
+                    // ChunkManipulator returned null, forward original chunk
+                    chunkToForward = chunkContent;
+                    _logger.LogDebug("[CITATION INTERCEPTOR] Chunk {ChunkNumber} forwarded without modification", totalChunks);
+                }
+                
+                // Forward the chunk to the client
+                var chunkBytes = Encoding.UTF8.GetBytes(chunkToForward);
+                await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
                 
                 // Reset for next chunk
                 currentChunk.Clear();
@@ -93,11 +102,10 @@ public class CitationResponseInterceptor : IResponseInterceptor
             var remainingContent = currentChunk.ToString();
             
             var processedRemaining = chunkManipulator.ProcessChunk(remainingContent);
-            if (processedRemaining != null)
-            {
-                var remainingBytes = Encoding.UTF8.GetBytes(processedRemaining);
-                await context.Response.Body.WriteAsync(remainingBytes, 0, remainingBytes.Length);
-            }
+            string remainingToForward = processedRemaining ?? remainingContent;
+            
+            var remainingBytes = Encoding.UTF8.GetBytes(remainingToForward);
+            await context.Response.Body.WriteAsync(remainingBytes, 0, remainingBytes.Length);
         }
         
         // Get final chunk with all accumulated citations
