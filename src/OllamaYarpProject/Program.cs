@@ -1,5 +1,6 @@
 using OllamaYarpProject;
 using OllamaYarpProject.Models;
+using OllamaYarpProject.Interfaces;
 using System.Reflection;
 using Serilog;
 using Yarp.ReverseProxy.Configuration;
@@ -41,6 +42,10 @@ builder.Services.Configure<O3ProConfig>(builder.Configuration.GetSection("O3ProC
 // Remove explicit logging configuration to allow appsettings.json to control logging
 // builder.Logging.ClearProviders();
 // builder.Logging.AddConsole();
+
+// Register abstraction services
+builder.Services.AddSingleton<IDateTime, DateTimeWrapper>();
+builder.Services.AddSingleton<IModelRouter, ModelRouter>();
 
 builder.Services.AddSingleton<StandardTransform>();
 builder.Services.AddSingleton<O3ProClient>();

@@ -12,6 +12,7 @@ public interface IModelRouter
 {
     Task<IModel?> GetCustomModelAsync(string? modelName);
     Task<GenerateChatCompletionResponse?> GenerateDirectResponseAsync(IModel model, GenerateChatCompletionRequest request);
+    IEnumerable<IModel> GetModels();
 }
 
 public class ModelRouter : IModelRouter
@@ -76,5 +77,10 @@ public class ModelRouter : IModelRouter
             _logger.LogError(ex, "[CUSTOM MODEL] Error generating response from model '{ModelName}'", model.Name);
             return null;
         }
+    }
+
+    public IEnumerable<IModel> GetModels()
+    {
+        return _models;
     }
 }

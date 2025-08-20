@@ -221,4 +221,37 @@ public class ModelRouterTests
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }
+
+    [Fact]
+    public void GetModels_ReturnsAllRegisteredModels()
+    {
+        // Arrange
+        var mockModel1 = new Mock<IModel>();
+        mockModel1.Setup(m => m.Name).Returns("model-1");
+        var mockModel2 = new Mock<IModel>();
+        mockModel2.Setup(m => m.Name).Returns("model-2");
+        
+        _mockModels.Add(mockModel1.Object);
+        _mockModels.Add(mockModel2.Object);
+
+        // Act
+        var result = _modelRouter.GetModels();
+
+        // Assert
+        Assert.Equal(2, result.Count());
+        Assert.Contains(result, m => m.Name == "model-1");
+        Assert.Contains(result, m => m.Name == "model-2");
+    }
+
+    [Fact]
+    public void GetModels_WithEmptyModelList_ReturnsEmptyEnumerable()
+    {
+        // Arrange - _mockModels is already empty
+
+        // Act
+        var result = _modelRouter.GetModels();
+
+        // Assert
+        Assert.Empty(result);
+    }
 }

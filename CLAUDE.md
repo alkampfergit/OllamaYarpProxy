@@ -23,6 +23,11 @@ The application listens on http://localhost:11434 by default and forwards reques
 - **Run tests with coverage**: `dotnet test --collect:"XPlat Code Coverage"`
 - **No linting commands found** - standard .NET analyzers are used via project configuration
 
+## Developer Guidelines
+
+- After making changes, always buid and run tests to verify that everything is ok.
+- After a task is completed, commit the code with a good commit message that describes the changes made.
+
 ## Architecture
 
 ### Core Components

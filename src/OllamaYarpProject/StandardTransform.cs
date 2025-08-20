@@ -14,14 +14,14 @@ namespace OllamaYarpProject;
 public class StandardTransform : ITransformProvider
 {
     private readonly ILogger<StandardTransform> _logger;
-    private readonly IEnumerable<IModel> _models;
     private readonly IChunkManipulatorFactory _chunkManipulatorFactory;
+    private readonly IModelRouter _modelRouter;
 
-    public StandardTransform(ILogger<StandardTransform> logger, IEnumerable<IModel> models, IChunkManipulatorFactory chunkManipulatorFactory)
+    public StandardTransform(ILogger<StandardTransform> logger, IChunkManipulatorFactory chunkManipulatorFactory, IModelRouter modelRouter)
     {
         _logger = logger;
-        _models = models;
         _chunkManipulatorFactory = chunkManipulatorFactory;
+        _modelRouter = modelRouter;
     }
 
     private class RequestResponseData
@@ -90,48 +90,25 @@ public class StandardTransform : ITransformProvider
                 try
                 {
                     // Check if the requested model is one of our custom IModel instances
-                    var customModel = _models.FirstOrDefault(m => 
-                        m.Name.Equals(cco?.Model, StringComparison.OrdinalIgnoreCase));
+                    var customModel = await _modelRouter.GetCustomModelAsync(cco?.Model);
 
                     if (customModel != null)
                     {
                         _logger.LogInformation("[CUSTOM MODEL] {Method} {OriginalPath} -> Direct response from custom model '{ModelName}'", 
                             method, originalPath, customModel.Name);
                         
-                        // Create a single message from the chat completion messages
-                        StringBuilder stringBuilder = new StringBuilder();
-                        if (cco?.Messages != null)
+                        var ollamaResponse = cco != null ? await _modelRouter.GenerateDirectResponseAsync(customModel, cco) : null;
+                        if (ollamaResponse != null)
                         {
-                            foreach (var message in cco.Messages)
-                            {
-                                stringBuilder.AppendLine($"Role: {message.Role}");
-                                stringBuilder.AppendLine(message.Content);
-                                stringBuilder.AppendLine("-------");
-                            }
+                            var response = transformContext.HttpContext.Response;
+                            response.StatusCode = 200;
+                            response.ContentType = "application/json";
+
+                            //serialize to json 
+                            var jsonResponse = JsonConvert.SerializeObject(ollamaResponse, Formatting.Indented);
+                            await response.WriteAsync(jsonResponse);
+                            return;
                         }
-
-                        var modelResponse = await customModel.GenerateAsync(stringBuilder.ToString());
-                        var response = transformContext.HttpContext.Response;
-                        response.StatusCode = 200;
-                        response.ContentType = "application/json";
-
-                        var ollamaResponse = new GenerateChatCompletionResponseBuilder
-                        {
-                            Message = new Message
-                            {
-                                Role = MessageRole.Assistant,
-                                Content = modelResponse
-                            },
-                            Model = customModel.Name,
-                            CreatedAt = DateTime.UtcNow,
-                            Done = true,
-                            DoneReason = DoneReasonEnum.Stop,
-                        }.Build();
-
-                        //serialize to json 
-                        var jsonResponse = JsonConvert.SerializeObject(ollamaResponse, Formatting.Indented);
-                        await response.WriteAsync(jsonResponse);
-                        return;
                     }
                 }
                 catch (Exception ex)
@@ -157,7 +134,7 @@ public class StandardTransform : ITransformProvider
                 var model = json?.Value<string>("model");
 
                 // Check if it's one of our custom models
-                var customModel = _models.FirstOrDefault(m => m.Name.Equals(model, StringComparison.OrdinalIgnoreCase));
+                var customModel = await _modelRouter.GetCustomModelAsync(model);
 
                 var response = transformContext.HttpContext.Response;
                 response.StatusCode = 200;
@@ -228,7 +205,7 @@ public class StandardTransform : ITransformProvider
                     });
 
                 // Add IModel instances to the list
-                var customModels = _models.Select(m => new OllamaModel
+                var customModels = _modelRouter.GetModels().Select(m => new OllamaModel
                 {
                     name = m.Name,
                     model = m.Name,
