@@ -21,9 +21,10 @@ public class CitationStreamingProcessor : IStreamingResponseProcessor
 
     public bool ShouldProcess(HttpContext context, string modelName)
     {
-        // This processor handles citation extraction for any model
-        // The actual decision is made by the factory based on configuration
-        return true;
+        // This processor should only be used when explicitly configured
+        // Return false here to prevent it from being selected as a fallback
+        // The factory will only select this processor if configured in ModelInterceptorMappings
+        return false;
     }
 
     public Interfaces.ChatCompletionChunk? ProcessChunk(Interfaces.ChatCompletionChunk chunk)

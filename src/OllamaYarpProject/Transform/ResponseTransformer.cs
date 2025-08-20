@@ -1,6 +1,7 @@
 using System.Text;
 using Newtonsoft.Json;
 using OllamaYarpProject.Interfaces;
+using OllamaYarpProject.Services;
 using Yarp.ReverseProxy.Transforms;
 
 namespace OllamaYarpProject.Transform;
@@ -11,17 +12,20 @@ public class ResponseTransformer : IResponseTransformer
     private readonly IModelRouter _modelRouter;
     private readonly IStreamingResponseHandler _streamingHandler;
     private readonly IRequestResponseLogger _requestResponseLogger;
+    private readonly IStreamingResponseProcessorFactory _processorFactory;
 
     public ResponseTransformer(
         ILogger<ResponseTransformer> logger,
         IModelRouter modelRouter,
         IStreamingResponseHandler streamingHandler,
-        IRequestResponseLogger requestResponseLogger)
+        IRequestResponseLogger requestResponseLogger,
+        IStreamingResponseProcessorFactory processorFactory)
     {
         _logger = logger;
         _modelRouter = modelRouter;
         _streamingHandler = streamingHandler;
         _requestResponseLogger = requestResponseLogger;
+        _processorFactory = processorFactory;
     }
 
     public async Task TransformResponseAsync(ResponseTransformContext transformContext)
@@ -124,9 +128,32 @@ public class ResponseTransformer : IResponseTransformer
 
             if (isStreamingResponse)
             {
-                // Handle streaming response with new architecture
-                await _streamingHandler.HandleStreamingResponseAsync(context, response, requestData);
-                transformContext.SuppressResponseBody = true;
+                var modelName = requestData?.ModelName ?? "";
+                var processor = _processorFactory.GetProcessor(modelName);
+                
+                if (processor != null)
+                {
+                    // Handle streaming response with processor
+                    _logger.LogDebug("[RESPONSE TRANSFORM] Using streaming handler for model {ModelName} with processor {ProcessorName}", 
+                        modelName, processor.Name);
+                    await _streamingHandler.HandleStreamingResponseAsync(context, response, requestData);
+                    transformContext.SuppressResponseBody = true;
+                }
+                else
+                {
+                    // No processor needed - let YARP handle the response directly without any custom processing
+                    _logger.LogDebug("[RESPONSE TRANSFORM] No processor for model {ModelName}, letting YARP handle streaming response directly", 
+                        modelName);
+                    
+                    // Store response data for logging if needed
+                    if (requestData != null)
+                    {
+                        // For logging purposes, we can still capture some response info without processing the stream
+                        requestData.ResponseContent = "[Streaming response - passed through directly]";
+                    }
+                    
+                    // Don't suppress response body - let YARP stream it directly to the client
+                }
             }
             else
             {

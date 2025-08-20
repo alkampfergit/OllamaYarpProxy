@@ -25,8 +25,16 @@ public class StreamingResponseHandler : IStreamingResponseHandler
         var modelName = requestData?.ModelName ?? "";
         var processor = _processorFactory.GetProcessor(modelName);
         
+        // If no processor is configured, use fast-path without deserialization
+        if (processor == null)
+        {
+            _logger.LogDebug("[STREAMING HANDLER] No processor for model {ModelName}, using fast-path passthrough", modelName);
+            await PassThroughStreamingResponse(context, response, requestData);
+            return;
+        }
+        
         _logger.LogDebug("[STREAMING HANDLER] Processing streaming response for model {ModelName} with processor {ProcessorName}", 
-            modelName, processor?.Name ?? "none");
+            modelName, processor.Name);
 
         var responseStream = await response.Content.ReadAsStreamAsync();
         var responseBuilder = new StringBuilder();
@@ -95,5 +103,36 @@ public class StreamingResponseHandler : IStreamingResponseHandler
         }
 
         _logger.LogDebug("[STREAMING HANDLER] Completed streaming response processing for model {ModelName}", modelName);
+    }
+
+    private async Task PassThroughStreamingResponse(HttpContext context, HttpResponseMessage response, RequestResponseData? requestData)
+    {
+        var responseStream = await response.Content.ReadAsStreamAsync();
+        var responseBuilder = new StringBuilder();
+        
+        // Simple pass-through without any deserialization or processing
+        using var reader = new StreamReader(responseStream, Encoding.UTF8);
+        var buffer = new char[8192]; // 8KB buffer
+        int bytesRead;
+        
+        while ((bytesRead = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        {
+            var chunk = new string(buffer, 0, bytesRead);
+            responseBuilder.Append(chunk);
+            
+            var chunkBytes = Encoding.UTF8.GetBytes(chunk);
+            await context.Response.Body.WriteAsync(chunkBytes, 0, chunkBytes.Length);
+            
+            // Flush immediately to maintain streaming behavior
+            await context.Response.Body.FlushAsync();
+        }
+        
+        // Store response content for logging
+        if (requestData != null)
+        {
+            requestData.ResponseContent = responseBuilder.ToString();
+        }
+        
+        _logger.LogDebug("[STREAMING HANDLER] Completed fast-path streaming response passthrough");
     }
 }

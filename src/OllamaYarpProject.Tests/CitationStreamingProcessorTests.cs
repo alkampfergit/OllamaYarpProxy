@@ -18,13 +18,15 @@ public class CitationStreamingProcessorTests
     }
 
     [Fact]
-    public void ShouldProcess_ReturnsTrue()
+    public void ShouldProcess_ReturnsFalse()
     {
         // Act
         var result = _processor.ShouldProcess(null!, "any-model");
 
-        // Assert
-        Assert.True(result);
+        // Assert  
+        // CitationStreamingProcessor should return false to prevent fallback usage
+        // It should only be used when explicitly configured via ModelInterceptorMappings
+        Assert.False(result);
     }
 
     [Fact]
