@@ -5,6 +5,7 @@ using OllamaYarpProject.Configuration;
 using OllamaYarpProject.Services;
 using OllamaYarpProject.Interceptors;
 using OllamaYarpProject.Processors;
+using Transform = OllamaYarpProject.Transform;
 using System.Reflection;
 using Serilog;
 using Yarp.ReverseProxy.Configuration;
@@ -52,7 +53,14 @@ builder.Services.Configure<InterceptorConfiguration>(builder.Configuration.GetSe
 builder.Services.AddSingleton<IDateTime, DateTimeWrapper>();
 builder.Services.AddSingleton<IModelRouter, ModelRouter>();
 
+// Register transform services
 builder.Services.AddSingleton<StandardTransform>();
+builder.Services.AddTransient<Transform.IPathTransformer, Transform.PathTransformer>();
+builder.Services.AddTransient<Transform.IRequestTransformer, Transform.RequestTransformer>();
+builder.Services.AddTransient<Transform.IResponseTransformer, Transform.ResponseTransformer>();
+builder.Services.AddTransient<Transform.IStreamingResponseHandler, Transform.StreamingResponseHandler>();
+builder.Services.AddTransient<Transform.IRequestResponseLogger, Transform.RequestResponseLogger>();
+
 builder.Services.AddSingleton<O3ProClient>();
 
 // Register new streaming response processing services
