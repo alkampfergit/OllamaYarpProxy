@@ -5,10 +5,11 @@ using OllamaYarpProject.Configuration;
 using OllamaYarpProject.Services;
 using OllamaYarpProject.Interceptors;
 using OllamaYarpProject.Processors;
+using OllamaYarpProject.Handlers;
+using OllamaYarpProject.Factories;
+using OllamaYarpProject.Providers;
 using Transform = OllamaYarpProject.Transform;
-using System.Reflection;
 using Serilog;
-using Yarp.ReverseProxy.Configuration;
 
 // Set current directory to executable location
 Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory;
@@ -41,9 +42,10 @@ else
     logger.Debug("No configuration override file found, using default appsettings.json");
 }
 
-// Configure O3ProConfig and InterceptorConfiguration from configuration
+// Configure O3ProConfig, InterceptorConfiguration, and ChatProviderConfiguration from configuration
 builder.Services.Configure<O3ProConfig>(builder.Configuration.GetSection("O3ProConfig"));
 builder.Services.Configure<InterceptorConfiguration>(builder.Configuration.GetSection("InterceptorConfiguration"));
+builder.Services.Configure<ChatProviderConfiguration>(builder.Configuration.GetSection("ChatProvider"));
 
 // Remove explicit logging configuration to allow appsettings.json to control logging
 // builder.Logging.ClearProviders();
@@ -61,6 +63,11 @@ builder.Services.AddTransient<Transform.IResponseTransformer, Transform.Response
 builder.Services.AddTransient<Transform.IStreamingResponseHandler, Transform.StreamingResponseHandler>();
 builder.Services.AddTransient<Transform.IRequestResponseLogger, Transform.RequestResponseLogger>();
 
+// Register models response handlers
+builder.Services.AddTransient<LiteLLMModelsResponseHandler>();
+builder.Services.AddTransient<OpenWebUIModelsResponseHandler>();
+builder.Services.AddSingleton<IModelsResponseHandlerFactory, ModelsResponseHandlerFactory>();
+
 builder.Services.AddSingleton<O3ProClient>();
 
 // Register new streaming response processing services
@@ -74,12 +81,26 @@ builder.Services.AddSingleton<IChunkManipulatorFactory, ChunkManipulatorFactory>
 builder.Services.AddTransient<CitationResponseInterceptor>();
 builder.Services.AddSingleton<IResponseInterceptorFactory, ResponseInterceptorFactory>();
 
+// Register chat provider factory
+builder.Services.AddSingleton<IChatProviderFactory, ChatProviderFactory>();
+
+// Register chat provider using factory
+builder.Services.AddSingleton<IChatProvider>(serviceProvider =>
+{
+    var factory = serviceProvider.GetRequiredService<IChatProviderFactory>();
+    return factory.CreateProvider();
+});
+
 // Add YARP reverse proxy
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
     .AddTransforms<StandardTransform>();
 
 var app = builder.Build();
+
+// Log active chat provider after building the app
+var chatProvider = app.Services.GetRequiredService<IChatProvider>();
+logger.Information("Active chat provider: {Provider}", chatProvider.Name);
 
 // Log YARP configuration at startup
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();

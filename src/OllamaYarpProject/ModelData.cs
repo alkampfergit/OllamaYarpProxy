@@ -16,6 +16,16 @@ public class SourceRoot
     public string @object { get; set; }
 }
 
+public class OpenWebUiModelData
+{
+    public string? id { get; set; }
+}
+
+public class OpenWebUiSourceRoot
+{
+    public List<OpenWebUiModelData>? data { get; set; }
+}
+
 public class OllamaModelDetails
 {
     public string parent_model { get; set; } = "";
