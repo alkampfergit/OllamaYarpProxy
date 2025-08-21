@@ -76,7 +76,7 @@ public class ResponseTransformer : IResponseTransformer
 
         var answer = new GemmaModel
         {
-            Capabilities = new List<string> { "chat" },
+            Capabilities = new List<string> { "chat", "tools" },
             ModelInfo = new ModelInfo
             {
                 Architecture = modelName ?? "unknown"
