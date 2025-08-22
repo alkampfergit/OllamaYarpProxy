@@ -4,6 +4,7 @@ using Newtonsoft.Json.Linq;
 using Ollama;
 using OllamaYarpProject.Interfaces;
 using OllamaYarpProject.Helpers;
+using OllamaYarpProject.Models;
 using Yarp.ReverseProxy.Transforms;
 
 namespace OllamaYarpProject.Transform;
@@ -120,38 +121,46 @@ public class RequestTransformer : IRequestTransformer
         var originalPath = context.Request.Path + context.Request.QueryString;
         var method = context.Request.Method;
 
-        _logger.LogInformation("[DIRECT RESPONSE] {Method} {OriginalPath} -> Mock model info response", method, originalPath);
+        _logger.LogInformation("[DIRECT RESPONSE] {Method} {OriginalPath} -> Sample detail response with model name replacement", method, originalPath);
         
+        // Enable buffering to read request body
         context.Request.EnableBuffering();
 
         using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
         string body = await reader.ReadToEndAsync();
 
-        // deserialize in json 
-        var json = JsonConvert.DeserializeObject(body) as JObject;
-        var model = json?.Value<string>("model");
-
-        // Check if it's one of our custom models
-        var customModel = await _modelRouter.GetCustomModelAsync(model);
+        // Parse the request body to get the model name
+        string? requestedModel = null;
+        try
+        {
+            var json = JsonConvert.DeserializeObject(body) as JObject;
+            requestedModel = json?.Value<string>("model");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse request body for model name");
+            throw new Exception("Request is invalid, we do not have model name");
+        }
 
         var response = transformContext.HttpContext.Response;
         response.StatusCode = 200;
         response.ContentType = "application/json";
 
-        GemmaModel answer = new GemmaModel();
-        answer.Capabilities = new List<string> { "chat" };
-        answer.ModelInfo = new ModelInfo();
-        answer.ModelInfo.Architecture = model ?? "unknown";
-
-        // If it's a custom model, add additional info
-        if (customModel != null)
+        try
         {
-            answer.ModelInfo.Architecture = customModel.Name;
-            // Could add more custom model info here if needed
+            // Read and deserialize the sample-detail.json file
+            var sampleDetailPath = Path.Combine(Directory.GetCurrentDirectory(), "Resources", "sample-detail.json");
+            var jsonContent = await File.ReadAllTextAsync(sampleDetailPath);
+            
+            jsonContent = jsonContent.Replace("{{MODELNAME}}", requestedModel, StringComparison.OrdinalIgnoreCase);
+            await response.WriteAsync(jsonContent);
         }
-
-        var jsonResponse = JsonConvert.SerializeObject(answer, Formatting.Indented);
-        await response.WriteAsync(jsonResponse);
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read or process sample-detail.json file");
+            // Fallback to empty response if file not found or parsing fails
+            await response.WriteAsync("{}");
+        }
         
         return true; // Request handled directly
     }
