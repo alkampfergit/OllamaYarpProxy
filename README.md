@@ -142,11 +142,16 @@ Example: Map the "gpt-4" model to use citation processing:
 
 ## Endpoints
 
-- `/api/tags` → `/models` (rewritten and response schema adapted for the active chat provider)
-- `/api/show` → Returns model info in Ollama format (adapted from the configured backend)
-- `/api/version` → Returns Ollama-compatible version info
-- `/v1/chat/completions` → `/chat/completions` (rewritten and routed to the active chat provider)
-- All other endpoints are proxied as-is to the configured backend
+
+The proxy rewrites and adapts Ollama API endpoints to the corresponding endpoints of the active chat provider. The table below shows how each endpoint is mapped for each availabe provider:
+
+| Ollama API Endpoint         | OpenWebUI Endpoint      | LiteLLM Endpoint| Description                                      |
+|----------------------------|----------------------------------|----------------------------|--------------------------------------------------|
+| `/api/tags`                | `/api/v1/models`                 | `/models`                  | Lists available models                           |
+| `/api/show`                | Handled by backend           | Handled by backend     | Returns model info in Ollama format              |
+| `/api/version`             | Handled by backend | Handled by backend | Returns Ollama-compatible version info           |
+| `/v1/chat/completions`     | `/api/v1/chat/completions`       | `/chat/completions`        | Generates chat completions                       |
+| other endpoints            | proxied as-is                    | proxied as-is              | Forwards request to provider unchanged            |
 
 The proxy automatically adapts requests and responses based on the active chat provider configuration, ensuring compatibility with Ollama's expected API format.
 
