@@ -13,11 +13,13 @@ public class RequestTransformer : IRequestTransformer
 {
     private readonly ILogger<RequestTransformer> _logger;
     private readonly IModelRouter _modelRouter;
+    private readonly IChatProvider _chatProvider;
 
-    public RequestTransformer(ILogger<RequestTransformer> logger, IModelRouter modelRouter)
+    public RequestTransformer(ILogger<RequestTransformer> logger, IModelRouter modelRouter, IChatProvider chatProvider)
     {
         _logger = logger;
         _modelRouter = modelRouter;
+        _chatProvider = chatProvider;
     }
 
     public async Task<bool> TransformRequestAsync(RequestTransformContext transformContext)
@@ -25,6 +27,13 @@ public class RequestTransformer : IRequestTransformer
         var context = transformContext.HttpContext;
         var originalPath = context.Request.Path + context.Request.QueryString;
         var method = context.Request.Method;
+
+        // Set the Authorization header if JWT token is available for the chat provider
+        var jwtToken = _chatProvider.Authentication.JwtToken;
+        if (!string.IsNullOrEmpty(jwtToken))
+        {
+            transformContext.ProxyRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", jwtToken);
+        }
 
         _logger.LogDebug("[REQUEST TRANSFORM] Processing {Method} {OriginalPath}", method, originalPath);
 
@@ -78,7 +87,7 @@ public class RequestTransformer : IRequestTransformer
         requestData.RequestBody = body;
 
         var cco = JsonConvert.DeserializeObject<GenerateChatCompletionRequest>(body);
-        
+
         // Store model name for later use by processors
         requestData.ModelName = cco?.Model ?? "";
 
@@ -89,9 +98,9 @@ public class RequestTransformer : IRequestTransformer
 
             if (customModel != null)
             {
-                _logger.LogInformation("[CUSTOM MODEL] {Method} {OriginalPath} -> Direct response from custom model '{ModelName}'", 
+                _logger.LogInformation("[CUSTOM MODEL] {Method} {OriginalPath} -> Direct response from custom model '{ModelName}'",
                     method, originalPath, customModel.Name);
-                
+
                 var ollamaResponse = cco != null ? await _modelRouter.GenerateDirectResponseAsync(customModel, cco) : null;
                 if (ollamaResponse != null)
                 {
@@ -172,12 +181,12 @@ public class RequestTransformer : IRequestTransformer
         var method = context.Request.Method;
 
         _logger.LogInformation("[DIRECT RESPONSE] {Method} {OriginalPath} -> Static version response", method, originalPath);
-        
+
         var response = transformContext.HttpContext.Response;
         response.StatusCode = 200;
         response.ContentType = "application/json";
         await response.WriteAsync("{\"version\": \"0.9.6\"}");
-        
+
         return true; // Request handled directly
     }
 }

@@ -6,6 +6,7 @@ OllamaYarpProxy is an ASP.NET Core reverse proxy that emulates Ollama's API endp
 
 - **Ollama API Compatibility:** Exposes endpoints like `/api/tags`, `/api/show`, `/api/version`, and `/v1/chat/completions`, rewriting and transforming requests/responses as needed.
 - **Configurable Backend:** Forwards requests to a backend server, configurable via external configuration files.
+- **Multi-Provider Support:** Supports multiple chat provider backends (OpenWebUI, LiteLLM) with configurable authentication and routing.
 - **Configuration Discovery:** Automatically finds configuration override files in current or parent directories.
 - **Response Interceptors:** Configurable streaming response processors for model-specific transformations (e.g., citation extraction).
 - **Custom Transforms:** Uses YARP's transform pipeline to rewrite paths and adapt JSON schemas for Ollama compatibility.
@@ -60,10 +61,16 @@ OllamaYarpProxy is an ASP.NET Core reverse proxy that emulates Ollama's API endp
       "ollamaCluster": {
         "Destinations": {
           "destination1": {
-            "Address": "http://localhost:4000/"
+            "Address": "http://localhost:3000/"
           }
         }
       }
+    }
+  },
+  "ChatProvider": {
+    "Active": "OpenWebUI",
+    "Authentication": {
+      "JwtToken": "your-jwt-token-here"
     }
   },
   "InterceptorConfiguration": {
@@ -87,8 +94,33 @@ The proxy searches for configuration files in this order:
 ### Available Configuration Options
 
 - **Backend URL:** Configure the target server in the `ReverseProxy.Clusters.ollamaCluster.Destinations.destination1.Address` field
+- **Chat Provider:** Select and configure chat provider backends via the `ChatProvider` section
 - **Response Interceptors:** Map specific AI models to response interceptors via `InterceptorConfiguration.ModelInterceptorMappings`
 - **Logging:** Override logging levels and outputs (same format as `appsettings.json`)
+
+### Chat Provider Configuration
+
+The proxy supports multiple chat provider backends with configurable authentication:
+
+#### Supported Providers
+
+- **OpenWebUI:** Direct integration with OpenWebUI instances
+- **LiteLLM:** Integration with LiteLLM proxy servers
+
+#### Configuration Structure
+
+```json
+{
+  "ChatProvider": {
+    "Active": "OpenWebUI",           // Supported provider: "OpenWebUI" or "LiteLLM"
+    "Authentication": {
+      "JwtToken": "your-token-here"  // JWT token for authentication, if requested by the provider
+    }
+  }
+}
+```
+
+**Note:** The YARP reverse proxy destination is configured independently from the chat provider, allowing flexible routing to different backend servers.
 
 ### Response Interceptors
 
@@ -110,14 +142,23 @@ Example: Map the "gpt-4" model to use citation processing:
 
 ## Endpoints
 
-- `/api/tags` → `/models` (rewritten and response schema adapted)
-- `/api/show` → Returns model info in Ollama format
-- `/api/version` → Returns Ollama-compatible version info
-- `/v1/chat/completions` → `/chat/completions` (rewritten)
-- All other endpoints are proxied as-is
+
+The proxy rewrites and adapts Ollama API endpoints to the corresponding endpoints of the active chat provider. The table below shows how each endpoint is mapped for each availabe provider:
+
+| Ollama API Endpoint         | OpenWebUI Endpoint      | LiteLLM Endpoint| Description                                      |
+|----------------------------|----------------------------------|----------------------------|--------------------------------------------------|
+| `/api/tags`                | `/api/v1/models`                 | `/models`                  | Lists available models                           |
+| `/api/show`                | Handled by backend           | Handled by backend     | Returns model info in Ollama format              |
+| `/api/version`             | Handled by backend | Handled by backend | Returns Ollama-compatible version info           |
+| `/v1/chat/completions`     | `/api/v1/chat/completions`       | `/chat/completions`        | Generates chat completions                       |
+| other endpoints            | proxied as-is                    | proxied as-is              | Forwards request to provider unchanged            |
+
+The proxy automatically adapts requests and responses based on the active chat provider configuration, ensuring compatibility with Ollama's expected API format.
 
 ## Why?
 
-This proxy allows tools (like Copilot) that expect Ollama's API to work with alternative backends, solving integration issues such as [vscode-copilot-release#7518](https://github.com/microsoft/vscode-copilot-release/issues/7518#issuecomment-3051433965).
+This proxy allows tools (like Copilot) that expect Ollama's API to work with alternative backends such as OpenWebUI or LiteLLM, solving integration issues such as [vscode-copilot-release#7518](https://github.com/microsoft/vscode-copilot-release/issues/7518#issuecomment-3051433965). 
+
+The multi-provider architecture enables seamless switching between different AI service backends while maintaining full Ollama API compatibility, making it ideal for development environments, testing different providers, or production deployments with specific authentication requirements.
 
 ---
